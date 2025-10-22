@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tic-Tac-Toe — Leaderboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{--bg:#e6f0ff;--card:#ffffff;--muted:#4b5b9a;--text:#0c1b3a;--accent:#2d5bff}
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 18px}
+    .brand a{color:var(--text);text-decoration:none}
+    .top-actions{display:flex;gap:12px;align-items:center}
+    a.btn,button.btn{padding:8px 12px;border-radius:10px;border:1px solid #d0d8ff;background:#f3f6ff;color:#0c1b3a;text-decoration:none}
+    .container{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:24px}
+    .card{width:100%;max-width:700px;background:var(--card);border:1px solid #dfe6ff;border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,0.08);padding:18px}
+    h1{margin:0 0 12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid #e7ecff;text-align:left}
+    th{color:#4056a1}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><a href="/">Tic‑Tac‑Toe</a></div>
+    <div class="top-actions">
+      <a class="btn" href="/profile.html">Profile</a>
+      <a class="btn" href="/test.html">Play</a>
+      <button id="logoutBtn" class="btn">Logout</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h1>Leaderboard</h1>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Username</th><th>Wins</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const BASE_URL = window.location.origin;
+    function logout(){ localStorage.removeItem('ttt_token'); window.location.href = '/'; }
+    document.getElementById('logoutBtn').onclick = logout;
+
+    async function loadLeaderboard(){
+      const res = await fetch(BASE_URL + '/leaderboard?limit=25');
+      const data = await res.json();
+      const rows = data.top || [];
+      const tbody = document.getElementById('rows');
+      tbody.innerHTML = '';
+      rows.forEach((r, i)=>{
+        const tr = document.createElement('tr');
+        const uname = r.username || r.playerId;
+        tr.innerHTML = `<td>${i+1}</td><td>${uname}</td><td>${r.wins}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    loadLeaderboard();
+  </script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+<!doctype html>
+<html>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/test.js" defer></script>
+  <style>
+    :root{--bg:#e6f0ff;--card:#ffffff;--muted:#4b5b9a;--text:#0c1b3a;--accent:#2d5bff}
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 18px}
+    .muted{color:var(--muted)}
+    .toast{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50}
+    .toast .t{background:#ffffff;border:1px solid #d0d8ff;color:#0c1b3a;padding:10px 12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,0.08);opacity:0;transform:translateY(12px);transition:opacity .2s, transform .2s}
+    .toast .t.show{opacity:1;transform:translateY(0)}
+    .bottomBar{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:center;padding:12px}
+    .bottomBar .btn{padding:10px 14px;border-radius:10px;border:1px solid #d0d8ff;background:#f3f6ff;color:#0c1b3a;text-decoration:none}
+    .top-actions{display:flex;gap:12px;align-items:center}
+    a.btn,button.btn{padding:8px 12px;border-radius:10px;border:1px solid #d0d8ff;background:#f3f6ff;color:#0c1b3a;text-decoration:none}
+    .container{flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}
+    .status{min-height:28px;color:#4056a1}
+    .gridWrap{position:relative}
+    .grid{display:grid;grid-template-columns:repeat(3,120px);gap:10px}
+    .cell{width:120px;height:120px;display:flex;align-items:center;justify-content:center;background:#ffffff;border:1px solid #dfe6ff;border-radius:12px;font-size:42px;cursor:pointer}
+    .cell.win{background:#eef4ff;box-shadow:inset 0 0 0 2px #6da0ff}
+    .strike{position:absolute;background:#6da0ff;height:6px;width:0;left:0;top:0;opacity:0;border-radius:3px;transform-origin:center center;transition:opacity .2s ease,width .2s ease}
+    .strike.show{opacity:1;width:100%}
+    .strike.h-row{width:100%;height:6px;left:0}
+    .strike.v-col{width:6px;height:100%;top:0}
+  </style>
+  </head>
+  <body>
+  <header>
+    <div class="brand"><a href="/">Tic‑Tac‑Toe</a></div>
+    <div class="top-actions">
+      <a class="btn" href="/profile.html">Profile</a>
+      <a class="btn" href="/leaderboard.html">Leaderboard</a>
+      <button id="logoutBtn" class="btn">Logout</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="status" id="statusText">Matching with a player...</div>
+    <div class="gridWrap" id="gridWrap">
+      <div class="grid" id="grid"></div>
+      <div class="strike" id="strike"></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="bottomBar" id="bottomBar" style="display:none">
+    <button class="btn" id="playAgainBtn">Play Again</button>
+  </div>
+
+<script>
+console.log('[client] boot test page');
+window.addEventListener('error', (e)=>{
+  try { console.error('[client] window error', e?.message || e); } catch {}
+});
+const BASE_URL = 'http://localhost:4000'; // TODO: change when deploying
+let sock;
+let currentGameId = null;
+let lastState = null;
+let token = localStorage.getItem('ttt_token') || null;
+let user = token ? parseJwt(token) : null;
+let myMark = null; // 'X' or 'O'
+let opponent = null; // { id, username }
+let joinTimer = null;
+
+function log(...args){
+  // no-op (logs hidden for users)
+}
+
+function parseJwt(t){
+  try{ const p = t.split('.')[1]; return JSON.parse(atob(p.replace(/-/g,'+').replace(/_/g,'/')));}catch(e){ return null; }
+}
+
+function drawGrid(state){
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  const board = state?.board || Array(9).fill(null);
+  const win = computeWin(board);
+  board.forEach((val, idx)=>{
+    const d=document.createElement('div');
+    d.className='cell' + (win?.indexes?.includes(idx)?' win':'');
+    d.textContent = val || '';
+    d.onclick = ()=>{
+      if(!currentGameId) return;
+      if(!user){ return alert('Login first'); }
+      sock.emit('game:move', { gameId: currentGameId, playerId: user.id, index: idx });
+    };
+    grid.appendChild(d);
+  });
+
+  drawStrike(win);
+  updateStatus(state, win);
+}
+
+function connectSocket(){
+  if (sock && sock.connected) return;
+  // Allow default transports (polling + websocket) for better compatibility
+  sock = io(BASE_URL, { auth: token ? { token } : undefined });
+  sock.on('connect', ()=>{ console.log('[client] connected', sock.id); startAutoJoin(); autoJoin(); });
+  sock.on('disconnect', (r)=>{ });
+  sock.on('connect_error', (e)=>{ console.warn('[client] connect_error', e?.message || e); });
+  sock.on('matchmaking:queued', ()=>{ console.log('[client] queued'); });
+  sock.on('game:matched', (d)=>{
+    currentGameId = d.gameId;
+    // determine my mark and opponent
+    const px = d.players?.X; const po = d.players?.O;
+    if (px && po && user) {
+      if (px.id === user.id) { myMark = 'X'; opponent = po; }
+      else if (po.id === user.id) { myMark = 'O'; opponent = px; }
+    }
+    setStatus(`Matched with ${opponent?.username || 'opponent'} · You are ${myMark}`);
+    showToast(`Matched with ${opponent?.username || 'opponent'}`);
+    document.getElementById('bottomBar').style.display = 'none';
+    stopAutoJoin();
+  });
+  sock.on('game:state', (s)=>{ lastState = s; drawGrid(s); });
+  sock.on('game:ended', (d)=>{
+    if (!lastState) return;
+    const outcome = lastState.winner; // 'X' | 'O' | 'draw'
+    if (outcome === 'draw') {
+      setStatus('Game ended in a draw');
+      showToast('Game ended in a draw');
+      document.getElementById('bottomBar').style.display = '';
+      return;
+    }
+    if (outcome === myMark) { setStatus('You won!'); showToast('You won!'); }
+    else { setStatus('You lost.'); showToast('You lost.'); }
+    document.getElementById('bottomBar').style.display = '';
+  });
+  sock.on('game:error', (e)=>{ });
+  sock.on('error', (e)=>{ });
+}
+
+function autoJoin(){
+  if(!user){ return; }
+  if(!currentGameId){ sock.emit('matchmaking:join', { playerId: user.id, username: user.username }); }
+}
+
+function startAutoJoin(){
+  stopAutoJoin();
+  joinTimer = setInterval(()=>{
+    if (!currentGameId && sock && sock.connected) autoJoin();
+  }, 3000);
+}
+
+function stopAutoJoin(){
+  if (joinTimer) { clearInterval(joinTimer); joinTimer = null; }
+}
+
+function logout(){ token=null; user=null; localStorage.removeItem('ttt_token'); try{ sock?.disconnect(); }catch{} window.location.href = '/'; }
+
+document.getElementById('logoutBtn').onclick = logout;
+document.getElementById('playAgainBtn').onclick = playAgain;
+
+// Guard: redirect to landing if not logged in
+if(!user){ window.location.href = '/'; }
+else { connectSocket(); }
+
+drawGrid(null);
+
+// --- UI helpers ---
+function setStatus(text){ const el = document.getElementById('statusText'); if (el) el.textContent = text; }
+
+function updateStatus(state, win){
+  if (!state) { setStatus('Matching with a player...'); return; }
+  if (state.status === 'active') {
+    const yourTurn = myMark && state.currentTurn === myMark;
+    const opp = opponent?.username || 'opponent';
+    setStatus(`${opp} vs You · ${yourTurn ? 'Your turn' : "Opponent's turn"}`);
+  } else if (state.status === 'completed') {
+    if (state.winner === 'draw') setStatus('Game ended in a draw');
+    else if (state.winner === myMark) setStatus('You won!');
+    else setStatus('You lost.');
+  } else {
+    setStatus('Matching with a player...');
+  }
+}
+
+const WIN_LINES = [
+  [0,1,2],[3,4,5],[6,7,8],
+  [0,3,6],[1,4,7],[2,5,8],
+  [0,4,8],[2,4,6]
+];
+
+function computeWin(board){
+  for (let i=0; i<WIN_LINES.length; i++){
+    const [a,b,c] = WIN_LINES[i];
+    if (board[a] && board[a]===board[b] && board[a]===board[c]){
+      return { indexes:[a,b,c], line:i };
+    }
+  }
+  return null;
+}
+
+function drawStrike(win){
+  const strike = document.getElementById('strike');
+  if (!strike) return;
+  if (!win) { strike.className='strike'; strike.style.opacity='0'; return; }
+  const line = win.line;
+  const wrap = document.getElementById('gridWrap');
+  const grid = document.getElementById('grid');
+  const rect = grid.getBoundingClientRect();
+  const width = rect.width; const height = rect.height;
+  strike.style.opacity='1';
+  strike.style.left = '0px';
+  strike.style.top = '0px';
+  strike.style.width = width + 'px';
+  strike.style.height = '6px';
+  strike.style.transform = 'none';
+  // rows
+  if (line===0||line===1||line===2){
+    const y = (line*1 + 0.5) * (height/3);
+    strike.style.top = (y - 3) + 'px';
+    strike.style.transform = 'none';
+  }
+  // cols
+  else if (line===3||line===4||line===5){
+    const x = ((line-3)*1 + 0.5) * (width/3);
+    strike.style.left = (x - 3) + 'px';
+    strike.style.width = '6px';
+    strike.style.height = height + 'px';
+  }
+  // diags
+  else if (line===6){
+    const len = Math.sqrt(width*width + height*height);
+    strike.style.width = len + 'px';
+    strike.style.left = '0px';
+    strike.style.top = '0px';
+    strike.style.transformOrigin = 'left top';
+    strike.style.transform = 'rotate(45deg) translateY(-3px)';
+  } else if (line===7){
+    const len = Math.sqrt(width*width + height*height);
+    strike.style.width = len + 'px';
+    strike.style.left = width + 'px';
+    strike.style.top = '0px';
+    strike.style.transformOrigin = 'left top';
+    strike.style.transform = 'rotate(-45deg) translate(-100%, -3px)';
+  }
+}
+
+// Toast and rematch helpers
+function showToast(message){
+  const container = document.getElementById('toast');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = 't';
+  el.textContent = message;
+  container.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add('show'));
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=>{ try{ container.removeChild(el); }catch{} }, 200);
+  }, 2500);
+}
+
+function playAgain(){
+  currentGameId = null;
+  lastState = null;
+  myMark = null;
+  opponent = null;
+  drawGrid(null);
+  setStatus('Matching with a player...');
+  const bar = document.getElementById('bottomBar');
+  if (bar) bar.style.display = 'none';
+  startAutoJoin();
+  autoJoin();
+}

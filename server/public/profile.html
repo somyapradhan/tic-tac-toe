@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tic-Tac-Toe — Profile</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{--bg:#e6f0ff;--card:#ffffff;--muted:#4b5b9a;--text:#0c1b3a;--accent:#2d5bff}
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+    header{display:flex;justify-content:space-between;align-items:center;padding:12px 18px}
+    .brand a{color:var(--text);text-decoration:none}
+    .top-actions{display:flex;gap:12px;align-items:center}
+    a.btn,button.btn{padding:8px 12px;border-radius:10px;border:1px solid #d0d8ff;background:#f3f6ff;color:#0c1b3a;text-decoration:none}
+    .container{flex:1;display:flex;align-items:flex-start;justify-content:center;padding:24px}
+    .card{width:100%;max-width:900px;background:var(--card);border:1px solid #dfe6ff;border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,0.08);padding:18px}
+    h1{margin:0 0 12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid #e7ecff;text-align:left}
+    th{color:#4056a1}
+    .muted{color:#6376b4}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><a href="/">Tic‑Tac‑Toe</a></div>
+    <div class="top-actions">
+      <a class="btn" href="/leaderboard.html">Leaderboard</a>
+      <a class="btn" href="/test.html">Play</a>
+      <button id="logoutBtn" class="btn">Logout</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <h1>Your recent games</h1>
+      <div class="muted" id="who">Loading...</div>
+      <table style="margin-top:10px">
+        <thead>
+          <tr><th>X</th><th>O</th><th>Result</th><th>Ended</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="row" style="margin-top:12px;justify-content:space-between">
+        <button id="prevBtn" class="btn">Prev</button>
+        <span id="pageInfo" class="muted"></span>
+        <button id="nextBtn" class="btn">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const BASE_URL = window.location.origin;
+    const token = localStorage.getItem('ttt_token') || null;
+    function parseJwt(t){ try{ const p=t.split('.')[1]; return JSON.parse(atob(p.replace(/-/g,'+').replace(/_/g,'/')));}catch(e){ return null; } }
+    const user = token ? parseJwt(token) : null;
+
+    document.getElementById('logoutBtn').onclick = ()=>{ localStorage.removeItem('ttt_token'); window.location.href='/'; };
+
+    const limit = 10;
+    let offset = 0;
+
+    async function loadGames(){
+      if(!token || !user){ window.location.href='/'; return; }
+      document.getElementById('who').textContent = `Logged in as ${user.username}`;
+      const res = await fetch(`${BASE_URL}/me/games?limit=${limit}&offset=${offset}` , { headers: { 'Authorization': 'Bearer ' + token } });
+      const data = await res.json();
+      const rows = data.games || [];
+      const tbody = document.getElementById('rows');
+      tbody.innerHTML = '';
+      rows.forEach(g=>{
+        const tr = document.createElement('tr');
+        const result = g.result || (g.winner === 'draw' ? 'Draw' : (g.winner ? `${g.winner} won` : '—'));
+        const ended = g.ended_at ? new Date(g.ended_at).toLocaleString() : '';
+        const xname = g.x_username || g.x_player_id;
+        const oname = g.o_username || g.o_player_id;
+        tr.innerHTML = `<td>${xname}</td><td>${oname}</td><td>${result}</td><td>${ended}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // Update pager
+      const start = rows.length ? (offset + 1) : 0;
+      const end = offset + rows.length;
+      document.getElementById('pageInfo').textContent = rows.length ? `Showing ${start}–${end}` : 'No games yet';
+      document.getElementById('prevBtn').disabled = offset <= 0;
+      // We don't know total; assume there may be a next page if we received a full page
+      document.getElementById('nextBtn').disabled = rows.length < limit;
+    }
+
+    document.getElementById('prevBtn').onclick = ()=>{ if (offset >= limit) { offset -= limit; loadGames(); } };
+    document.getElementById('nextBtn').onclick = ()=>{ offset += limit; loadGames(); };
+
+    loadGames();
+  </script>
+</body>
+</html>

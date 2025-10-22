@@ -1,0 +1,13 @@
+# Root
+node_modules/
+.DS_Store
+.env
+*.log
+
+# Build artifacts
+**/dist/
+**/.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
